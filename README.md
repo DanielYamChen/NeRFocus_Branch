@@ -2,7 +2,7 @@
 This repository contains the code release for ***[NeRFocus: Neural Radiance Field for 3D Synthetic Defocus](https://arxiv.org/abs/2203.05189)***. This implementation is written in JAX, and is a fork of Jon Barron's Mip-NeRF implementation. 
 ![image](https://user-images.githubusercontent.com/95485229/157234315-3ea60023-3765-40e0-b820-87653dcbcde1.png)
 ## Installation
-
+The current environment is built on Python 3.9.
 
 `git clone https://github.com/wyhuai/nerfocus.git; cd nerfocus`  
 `conda install pip; pip install --upgrade pip`  
