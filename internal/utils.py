@@ -103,8 +103,7 @@ def define_common_flags():
 
 
 def load_config():
-  gin.parse_config_files_and_bindings(flags.FLAGS.gin_file,
-                                      flags.FLAGS.gin_param)
+  gin.parse_config_files_and_bindings(flags.FLAGS.gin_file, flags.FLAGS.gin_param)
   return Config()
 
 

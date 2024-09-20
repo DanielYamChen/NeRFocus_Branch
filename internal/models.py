@@ -154,11 +154,13 @@ def construct_mipnerf(rng, example_batch):
   model = MipNerfModel()
   key, rng = random.split(rng)
   init_variables = model.init(
-      key,
-      rng=rng,
-      rays=utils.namedtuple_map(lambda x: x[0], example_batch['rays']),
-      randomized=False,
-      white_bkgd=False)
+    key,
+    rng=rng,
+    rays=utils.namedtuple_map(lambda x: x[0], example_batch['rays']),
+    randomized=False,
+    white_bkgd=False,
+  )
+  
   return model, init_variables
 
 

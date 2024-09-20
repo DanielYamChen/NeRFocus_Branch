@@ -38,8 +38,7 @@ from internal import vis
 
 FLAGS = flags.FLAGS
 utils.define_common_flags()
-flags.DEFINE_integer('render_every', 1000,#5000
-                     'The number of steps between test set image renderings.')
+flags.DEFINE_integer('render_every', 1000, 'The number of steps between test set image renderings.') # 5000
 
 jax.config.parse_flags_with_absl()
 
@@ -65,19 +64,17 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
   def loss_fn(variables):
 
     def tree_sum_fn(fn):
-      return jax.tree_util.tree_reduce(
-          lambda x, y: x + fn(y), variables, initializer=0)
+      return jax.tree_util.tree_reduce(lambda x, y: x + fn(y), variables, initializer=0)
 
-    weight_l2 = config.weight_decay_mult * (
-        tree_sum_fn(lambda z: jnp.sum(z**2)) /
-        tree_sum_fn(lambda z: jnp.prod(jnp.array(z.shape))))
+    weight_l2 = config.weight_decay_mult * (tree_sum_fn(lambda z: jnp.sum(z**2)) / tree_sum_fn(lambda z: jnp.prod(jnp.array(z.shape))))
 
     ret = model.apply(
-        variables,
-        key,
-        batch['rays'],
-        randomized=config.randomized,
-        white_bkgd=config.white_bkgd, a=a, f=f, l=l, train_coc=train_coc)#lens params
+      variables,
+      key,
+      batch['rays'],
+      randomized=config.randomized,
+      white_bkgd=config.white_bkgd, a=a, f=f, l=l, train_coc=train_coc,
+    ) # lens params
 
     mask = batch['rays'].lossmult
     if config.disable_multiscale_loss:
@@ -85,46 +82,47 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
 
     losses = []
     for (rgb, _, _) in ret:
-      losses.append(
-          (mask * (rgb - batch['pixels'][..., :3])**2).sum() / mask.sum())
+      losses.append((mask * (rgb - batch['pixels'][..., :3])**2).sum() / mask.sum())
+    
     losses = jnp.array(losses)
 
-    loss = (
-        config.coarse_loss_mult * jnp.sum(losses[:-1]) + losses[-1] + weight_l2)
+    loss = (config.coarse_loss_mult * jnp.sum(losses[:-1]) + losses[-1] + weight_l2)
 
     stats = utils.Stats(
-        loss=loss,
-        losses=losses,
-        weight_l2=weight_l2,
-        psnr=0.0,
-        psnrs=0.0,
-        grad_norm=0.0,
-        grad_abs_max=0.0,
-        grad_norm_clipped=0.0,
+      loss=loss,
+      losses=losses,
+      weight_l2=weight_l2,
+      psnr=0.0,
+      psnrs=0.0,
+      grad_norm=0.0,
+      grad_abs_max=0.0,
+      grad_norm_clipped=0.0,
     )
+
     return loss, stats
 
-  (_, stats), grad = (
-      jax.value_and_grad(loss_fn, has_aux=True)(state.optimizer.target))
+  (_, stats), grad = jax.value_and_grad(loss_fn, has_aux=True)(state.optimizer.target)
   grad = jax.lax.pmean(grad, axis_name='batch')
   stats = jax.lax.pmean(stats, axis_name='batch')
 
   def tree_norm(tree):
-    return jnp.sqrt(
-        jax.tree_util.tree_reduce(
-            lambda x, y: x + jnp.sum(y**2), tree, initializer=0))
+    return jnp.sqrt(jax.tree_util.tree_reduce(
+      lambda x, y: x + jnp.sum(y**2), tree, initializer=0
+    ))
 
-  if config.grad_max_val > 0:
+  if (config.grad_max_val > 0):
     clip_fn = lambda z: jnp.clip(z, -config.grad_max_val, config.grad_max_val)
     grad = jax.tree_util.tree_map(clip_fn, grad)
 
   grad_abs_max = jax.tree_util.tree_reduce(
-      lambda x, y: jnp.maximum(x, jnp.max(jnp.abs(y))), grad, initializer=0)
+    lambda x, y: jnp.maximum(x, jnp.max(jnp.abs(y))), grad, initializer=0
+  )
 
   grad_norm = tree_norm(grad)
-  if config.grad_max_norm > 0:
+  if (config.grad_max_norm > 0):
     mult = jnp.minimum(1, config.grad_max_norm / (1e-7 + grad_norm))
     grad = jax.tree_util.tree_map(lambda z: mult * z, grad)
+  
   grad_norm_clipped = tree_norm(grad)
 
   new_optimizer = state.optimizer.apply_gradient(grad, learning_rate=lr)
@@ -132,14 +130,14 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
 
   psnrs = math.mse_to_psnr(stats.losses)
   stats = utils.Stats(
-      loss=stats.loss,
-      losses=stats.losses,
-      weight_l2=stats.weight_l2,
-      psnr=psnrs[-1],
-      psnrs=psnrs,
-      grad_norm=grad_norm,
-      grad_abs_max=grad_abs_max,
-      grad_norm_clipped=grad_norm_clipped,
+    loss=stats.loss,
+    losses=stats.losses,
+    weight_l2=stats.weight_l2,
+    psnr=psnrs[-1],
+    psnrs=psnrs,
+    grad_norm=grad_norm,
+    grad_abs_max=grad_abs_max,
+    grad_norm_clipped=grad_norm_clipped,
   )
 
   return new_state, stats, rng
@@ -147,10 +145,10 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
 
 def main(unused_argv):
   file = open('my_curve/curve.txt', 'w')
-  a=0 #a=0.1*50 效果和原配置差不多
-  f=0.1
-  l=0.6
-  train_coc=1
+  a = 0 # a = 0.1*50 效果和原配置差不多
+  f = 0.1
+  l = 0.6
+  train_coc = 1
 
   rng = random.PRNGKey(20200823)
   # Shift the numpy random seed by host_id() to shuffle data loaded by different
@@ -159,7 +157,7 @@ def main(unused_argv):
 
   config = utils.load_config()
 
-  if config.batch_size % jax.device_count() != 0:
+  if (config.batch_size % jax.device_count() != 0):
     raise ValueError('Batch size must be divisible by the number of devices.')
 
   dataset = datasets.get_dataset('train', 'horns', config)
@@ -177,42 +175,47 @@ def main(unused_argv):
   rng, key = random.split(rng)
   model, variables = models.construct_mipnerf(key, dataset.peek())
   num_params = jax.tree_util.tree_reduce(
-      lambda x, y: x + jnp.prod(jnp.array(y.shape)), variables, initializer=0)
+    lambda x, y: x + jnp.prod(jnp.array(y.shape)), variables, initializer=0
+  )
   print(f'Number of parameters being optimized: {num_params}')
   optimizer = flax.optim.Adam(config.lr_init).create(variables)
   state = utils.TrainState(optimizer=optimizer)
   del optimizer, variables
 
   learning_rate_fn = functools.partial(
-      math.learning_rate_decay,
-      lr_init=config.lr_init,
-      lr_final=config.lr_final,
-      max_steps=config.max_steps,
-      lr_delay_steps=config.lr_delay_steps,
-      lr_delay_mult=config.lr_delay_mult)
+    math.learning_rate_decay,
+    lr_init=config.lr_init,
+    lr_final=config.lr_final,
+    max_steps=config.max_steps,
+    lr_delay_steps=config.lr_delay_steps,
+    lr_delay_mult=config.lr_delay_mult,
+  )
 
   train_pstep = jax.pmap(
-      functools.partial(train_step, model, config),
-      axis_name='batch',
-      in_axes=(0, 0, 0, None, None, None, None, None),#a=0, f=0.1, l=0.6, train_coc=0
-      donate_argnums=(2,))
+    functools.partial(train_step, model, config),
+    axis_name='batch',
+    in_axes=(0, 0, 0, None, None, None, None, None), # a = 0, f = 0.1, l = 0.6, train_coc = 0
+    donate_argnums=(2,)
+  )
 
   # Because this is only used for test set rendering, we disable randomization.
   def render_eval_fn(variables, _, rays, a, f, l, train_coc):
     return jax.lax.all_gather(
-        model.apply(
-            variables,
-            random.PRNGKey(0),  # Unused.
-            rays,
-            randomized=False,
-            white_bkgd=config.white_bkgd, a=a, f=f, l=l, train_coc=train_coc),
-        axis_name='batch')
+      model.apply(
+        variables,
+        random.PRNGKey(0),  # Unused.
+        rays,
+        randomized=False,
+        white_bkgd=config.white_bkgd, a=a, f=f, l=l, train_coc=train_coc
+      ),
+      axis_name='batch'
+    )
 
   render_eval_pfn = jax.pmap(
-      render_eval_fn,
-      in_axes=(None, None, 0, None, None, None, None),  # Only distribute the data input.
-      donate_argnums=(2,),
-      axis_name='batch',
+    render_eval_fn,
+    in_axes=(None, None, 0, None, None, None, None),  # Only distribute the data input.
+    donate_argnums=(2,),
+    axis_name='batch',
   )
 
   ssim_fn = jax.jit(functools.partial(math.compute_ssim, max_val=1.))
@@ -220,12 +223,14 @@ def main(unused_argv):
 
   if not utils.isdir(FLAGS.train_dir):
     utils.makedirs(FLAGS.train_dir)
+  
   state = checkpoints.restore_checkpoint(FLAGS.train_dir, state)
+  
   # Resume training a the step of the last checkpoint.
   init_step = state.optimizer.state.step + 1
   state = flax.jax_utils.replicate(state)
 
-  if jax.host_id() == 0:
+  if (jax.host_id() == 0):
     summary_writer = tensorboard.SummaryWriter(FLAGS.train_dir)
 
   # Prefetch_buffer_size = 3 x batch_size
@@ -246,27 +251,27 @@ def main(unused_argv):
 
 
 
-# next(test_dataset)pdataset, pdataset_r11, pdataset_r21, pdataset_r51, pdataset_r101
+  # next(test_dataset)pdataset, pdataset_r11, pdataset_r21, pdataset_r51, pdataset_r101
 
   for step in range(init_step, config.max_steps + 1):
     #train_coc = np.random.choice([1,3,7,15,31,51,71,101],p=[0.3,0.2,0.15,0.1,0.1,0.05,0.05,0.05])
-    train_coc = np.random.choice([1,3,7,15,31,51],p=[0.3,0.2,0.2,0.1,0.1,0.1])
+    train_coc = np.random.choice([1, 3, 7, 15, 31, 51], p=[0.3, 0.2, 0.2, 0.1, 0.1, 0.1])
     
-    if train_coc == 1:
+    if (train_coc == 1):
         batch = next(pdataset)
-    elif train_coc == 3:
+    elif (train_coc == 3):
         batch = next(pdataset_r3)
-    elif train_coc == 7:
+    elif (train_coc == 7):
         batch = next(pdataset_r7)
-    elif train_coc == 15:
+    elif (train_coc == 15):
         batch = next(pdataset_r15)
-    elif train_coc == 31:
+    elif (train_coc == 31):
         batch = next(pdataset_r31)
-    elif train_coc == 51:
+    elif (train_coc == 51):
         batch = next(pdataset_r51)
-    elif train_coc == 71:
+    elif (train_coc == 71):
         batch = next(pdataset_r71)
-    elif train_coc == 101:
+    elif (train_coc == 101):
         batch = next(pdataset_r101)
         
     #print("in main loop---------------train_coc:",train_coc)    
@@ -274,43 +279,43 @@ def main(unused_argv):
     if reset_timer:
       t_loop_start = time.time()
       reset_timer = False
+    
     lr = learning_rate_fn(step)
     state, stats, keys = train_pstep(keys, state, batch, lr, a, f, l, train_coc)
     if jax.host_id() == 0:
       stats_trace.append(stats)
+    
     if step % config.gc_every == 0:
       gc.collect()
 
     # Log training summaries. This is put behind a host_id check because in
     # multi-host evaluation, all hosts need to run inference even though we
     # only use host 0 to record results.
-    if jax.host_id() == 0:
-      if step % config.print_every == 0:
+    if (jax.host_id() == 0):
+      if (step % config.print_every == 0):
         summary_writer.scalar('num_params', num_params, step)
         summary_writer.scalar('train_loss', stats.loss[0], step)
         summary_writer.scalar('train_psnr', stats.psnr[0], step)
         for i, l in enumerate(stats.losses[0]):
           summary_writer.scalar(f'train_losses_{i}', l, step)
+        
         for i, p in enumerate(stats.psnrs[0]):
           summary_writer.scalar(f'train_psnrs_{i}', p, step)
+        
         summary_writer.scalar('weight_l2', stats.weight_l2[0], step)
         avg_loss = np.mean(np.concatenate([s.loss for s in stats_trace]))
         avg_psnr = np.mean(np.concatenate([s.psnr for s in stats_trace]))
-        max_grad_norm = np.max(
-            np.concatenate([s.grad_norm for s in stats_trace]))
-        avg_grad_norm = np.mean(
-            np.concatenate([s.grad_norm for s in stats_trace]))
-        max_clipped_grad_norm = np.max(
-            np.concatenate([s.grad_norm_clipped for s in stats_trace]))
-        max_grad_max = np.max(
-            np.concatenate([s.grad_abs_max for s in stats_trace]))
+        max_grad_norm = np.max(np.concatenate([s.grad_norm for s in stats_trace]))
+        avg_grad_norm = np.mean(np.concatenate([s.grad_norm for s in stats_trace]))
+        max_clipped_grad_norm = np.max(np.concatenate([s.grad_norm_clipped for s in stats_trace]))
+        max_grad_max = np.max(np.concatenate([s.grad_abs_max for s in stats_trace]))
+        
         stats_trace = []
         summary_writer.scalar('train_avg_loss', avg_loss, step)
         summary_writer.scalar('train_avg_psnr', avg_psnr, step)
         summary_writer.scalar('train_max_grad_norm', max_grad_norm, step)
         summary_writer.scalar('train_avg_grad_norm', avg_grad_norm, step)
-        summary_writer.scalar('train_max_clipped_grad_norm',
-                              max_clipped_grad_norm, step)
+        summary_writer.scalar('train_max_clipped_grad_norm', max_clipped_grad_norm, step)
         summary_writer.scalar('train_max_grad_max', max_grad_max, step)
         summary_writer.scalar('learning_rate', lr, step)
         steps_per_sec = config.print_every / (time.time() - t_loop_start)
@@ -324,30 +329,30 @@ def main(unused_argv):
               f'avg_loss={avg_loss:0.4f}, ' +
               f'weight_l2={stats.weight_l2[0]:0.2e}, ' + f'lr={lr:0.2e}, ' +
               f'{rays_per_sec:0.0f} rays/sec')
-      if step % config.save_every == 0:
+      
+      if (step % config.save_every == 0):
         state_to_save = jax.device_get(jax.tree_map(lambda x: x[0], state))
-        checkpoints.save_checkpoint(
-            FLAGS.train_dir, state_to_save, int(step), keep=100)
+        checkpoints.save_checkpoint(FLAGS.train_dir, state_to_save, int(step), keep=100)
 
     # Test-set evaluation.
-    if FLAGS.render_every > 0 and step % FLAGS.render_every == 0:
+    if ((FLAGS.render_every > 0) and (step % FLAGS.render_every == 0)):
       # We reuse the same random number generator from the optimization step
       # here on purpose so that the visualization matches what happened in
       # training.
       t_eval_start = time.time()
-      eval_variables = jax.device_get(jax.tree_map(lambda x: x[0],
-                                                   state)).optimizer.target
+      eval_variables = jax.device_get(jax.tree_map(lambda x: x[0], state)).optimizer.target
       test_case = next(test_dataset)
       pred_color, pred_distance, pred_acc = models.render_image(
-          functools.partial(render_eval_pfn, eval_variables),
-          test_case['rays'],
-          keys[0],
-          chunk=FLAGS.chunk, a=a, f=f, l=l, train_coc=train_coc)
+        functools.partial(render_eval_pfn, eval_variables),
+        test_case['rays'],
+        keys[0],
+        chunk=FLAGS.chunk, a=a, f=f, l=l, train_coc=train_coc
+      )
 
       #vis_suite = vis.visualize_suite(pred_distance, pred_acc)
 
       # Log eval summaries on host 0.
-      if jax.host_id() == 0:
+      if (jax.host_id() == 0):
         psnr = math.mse_to_psnr(((pred_color - test_case['pixels'])**2).mean())
         #ssim = ssim_fn(pred_color, test_case['pixels'])
         eval_time = time.time() - t_eval_start
@@ -364,10 +369,9 @@ def main(unused_argv):
         summary_writer.image('test_target', test_case['pixels'], step)
         file.write('step: ' + str(step) + ' ' + 'psnr: ' + str(psnr) + '\r\n')
 
-  if config.max_steps % config.save_every != 0:
+  if (config.max_steps % config.save_every != 0):
     state = jax.device_get(jax.tree_map(lambda x: x[0], state))
-    checkpoints.save_checkpoint(
-        FLAGS.train_dir, state, int(config.max_steps), keep=100)
+    checkpoints.save_checkpoint(FLAGS.train_dir, state, int(config.max_steps), keep=100)
 
 
 if __name__ == '__main__':
