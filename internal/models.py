@@ -260,17 +260,20 @@ def render_image(render_fn, rays, rng, a, f, l, train_coc, chunk=8192):
           lambda r: jnp.pad(r, ((0, padding), (0, 0)), mode='edge'), chunk_rays)
     else:
       padding = 0
-    # After padding the number of chunk_rays is always divisible by
-    # host_count.
-    rays_per_host = chunk_rays[0].shape[0] // jax.host_count()
+    # After padding, the number of chunk_rays is always divisible by host_count.
+    rays_per_host = chunk_rays[0].shape[0] // jax.process_count()
     start, stop = host_id * rays_per_host, (host_id + 1) * rays_per_host
-    chunk_rays = utils.namedtuple_map(lambda r: utils.shard(r[start:stop]),
-                                      chunk_rays)
+    chunk_rays = utils.namedtuple_map(
+      lambda r: utils.shard(r[start:stop]),
+      chunk_rays
+    )
     chunk_results = render_fn(rng, chunk_rays, a, f, l, train_coc)[-1]
     results.append([utils.unshard(x[0], padding) for x in chunk_results])
     # pylint: enable=cell-var-from-loop
+  
   rgb, distance, acc = [jnp.concatenate(r, axis=0) for r in zip(*results)]
   rgb = rgb.reshape((height, width, -1))
   distance = distance.reshape((height, width))
   acc = acc.reshape((height, width))
+  
   return (rgb, distance, acc)

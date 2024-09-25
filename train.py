@@ -24,10 +24,13 @@ from absl import flags
 import flax
 from flax.metrics import tensorboard
 from flax.training import checkpoints
+from flax.training.train_state import TrainState
 import jax
 from jax import random
 import jax.numpy as jnp
+import optax
 import numpy as np
+import os
 
 from internal import datasets
 from internal import math
@@ -101,7 +104,7 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
 
     return loss, stats
 
-  (_, stats), grad = jax.value_and_grad(loss_fn, has_aux=True)(state.optimizer.target)
+  (_, stats), grad = jax.value_and_grad(loss_fn, has_aux=True)(state.optimizer.params)
   grad = jax.lax.pmean(grad, axis_name='batch')
   stats = jax.lax.pmean(stats, axis_name='batch')
 
@@ -125,7 +128,7 @@ def train_step(model, config, rng, state, batch, lr, a=0, f=0.1, l=0.6, train_co
   
   grad_norm_clipped = tree_norm(grad)
 
-  new_optimizer = state.optimizer.apply_gradient(grad, learning_rate=lr)
+  new_optimizer = state.optimizer.apply_gradients(grads=grad)
   new_state = state.replace(optimizer=new_optimizer)
 
   psnrs = math.mse_to_psnr(stats.losses)
@@ -153,24 +156,32 @@ def main(unused_argv):
   rng = random.PRNGKey(20200823)
   # Shift the numpy random seed by host_id() to shuffle data loaded by different
   # hosts.
-  np.random.seed(20201473 + jax.host_id())
+  np.random.seed(20201473 + jax.process_index())
 
   config = utils.load_config()
 
   if (config.batch_size % jax.device_count() != 0):
     raise ValueError('Batch size must be divisible by the number of devices.')
 
-  dataset = datasets.get_dataset('train', 'horns', config)
-  dataset_r3 = datasets.get_dataset('train', 'horns_Guassblur/3', config)
-  dataset_r7 = datasets.get_dataset('train', 'horns_Guassblur/7', config)
-  dataset_r15 = datasets.get_dataset('train', 'horns_Guassblur/15', config)
-  dataset_r31 = datasets.get_dataset('train', 'horns_Guassblur/31', config)
-  dataset_r51 = datasets.get_dataset('train', 'horns_Guassblur/51', config)
-  dataset_r71 = datasets.get_dataset('train', 'horns_Guassblur/71', config)
-  dataset_r101 = datasets.get_dataset('train', 'horns_Guassblur/101', config)
-  test_dataset = datasets.get_dataset('test', 'horns', config)
-    
+  dataset = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name, config)
+  print("dataset_r1 built")
+  dataset_r3 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/3', config)
+  print("dataset_r3 built")
+  dataset_r7 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/7', config)
+  print("dataset_r7 built")
+  dataset_r15 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/15', config)
+  print("dataset_r15 built")
+  dataset_r31 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/31', config)
+  print("dataset_r31 built")
+  dataset_r51 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/51', config)
+  print("dataset_r51 built")
+  dataset_r71 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/71', config)
+  print("dataset_r71 built")
+  dataset_r101 = datasets.get_dataset('train', FLAGS.data_dir + config.obj_name + '_Gaussblur/101', config)
+  print("dataset_r101 built")
+  test_dataset = datasets.get_dataset('test', FLAGS.data_dir + config.obj_name, config)    
   #test_dataset = datasets.get_dataset('test', FLAGS.data_dir, config)
+  print("test_dataset built")
 
   rng, key = random.split(rng)
   model, variables = models.construct_mipnerf(key, dataset.peek())
@@ -178,18 +189,39 @@ def main(unused_argv):
     lambda x, y: x + jnp.prod(jnp.array(y.shape)), variables, initializer=0
   )
   print(f'Number of parameters being optimized: {num_params}')
-  optimizer = flax.optim.Adam(config.lr_init).create(variables)
+  
+  # Calculate the number of steps for the decay phase
+  decay_steps = config.max_steps - config.lr_delay_steps
+  
+  # Calculate the decay rate
+  decay_rate = (config.lr_final / config.lr_init) ** (1 / decay_steps)
+  
+  # Create the decay schedule using exponential decay
+  learning_rate_fn = optax.exponential_decay(
+    init_value=config.lr_init,
+    transition_steps=1,   # Set to 1 because decay_rate is per-step
+    decay_rate=decay_rate,
+    staircase=False,
+  )
+
+  # optimizer = flax.optim.Adam(config.lr_init).create(variables)
+  optimizer = TrainState.create(
+    apply_fn=model.apply,
+    params=variables,
+    tx=optax.adam(learning_rate=learning_rate_fn),
+  )
+
   state = utils.TrainState(optimizer=optimizer)
   del optimizer, variables
 
-  learning_rate_fn = functools.partial(
-    math.learning_rate_decay,
-    lr_init=config.lr_init,
-    lr_final=config.lr_final,
-    max_steps=config.max_steps,
-    lr_delay_steps=config.lr_delay_steps,
-    lr_delay_mult=config.lr_delay_mult,
-  )
+  # learning_rate_fn = functools.partial(
+  #   math.learning_rate_decay,
+  #   lr_init=config.lr_init,
+  #   lr_final=config.lr_final,
+  #   max_steps=config.max_steps,
+  #   lr_delay_steps=config.lr_delay_steps,
+  #   lr_delay_mult=config.lr_delay_mult,
+  # )
 
   train_pstep = jax.pmap(
     functools.partial(train_step, model, config),
@@ -221,16 +253,15 @@ def main(unused_argv):
   ssim_fn = jax.jit(functools.partial(math.compute_ssim, max_val=1.))
   #ssim_fn = functools.partial(math.compute_ssim, max_val=1.)
 
-  if not utils.isdir(FLAGS.train_dir):
-    utils.makedirs(FLAGS.train_dir)
+  os.makedirs(FLAGS.train_dir, exist_ok=True)
   
   state = checkpoints.restore_checkpoint(FLAGS.train_dir, state)
   
   # Resume training a the step of the last checkpoint.
-  init_step = state.optimizer.state.step + 1
+  init_step = state.optimizer.step + 1
   state = flax.jax_utils.replicate(state)
 
-  if (jax.host_id() == 0):
+  if (jax.process_index() == 0):
     summary_writer = tensorboard.SummaryWriter(FLAGS.train_dir)
 
   # Prefetch_buffer_size = 3 x batch_size
@@ -243,7 +274,7 @@ def main(unused_argv):
   pdataset_r71 = flax.jax_utils.prefetch_to_device(dataset_r71, 3)
   pdataset_r101 = flax.jax_utils.prefetch_to_device(dataset_r101, 3)
     
-  rng = rng + jax.host_id()  # Make random seed separate across hosts.
+  rng = rng + jax.process_index()  # Make random seed separate across hosts.
   keys = random.split(rng, jax.local_device_count())  # For pmapping RNG keys.
   gc.disable()  # Disable automatic garbage collection for efficiency.
   stats_trace = []
@@ -282,7 +313,7 @@ def main(unused_argv):
     
     lr = learning_rate_fn(step)
     state, stats, keys = train_pstep(keys, state, batch, lr, a, f, l, train_coc)
-    if jax.host_id() == 0:
+    if jax.process_index() == 0:
       stats_trace.append(stats)
     
     if step % config.gc_every == 0:
@@ -291,7 +322,7 @@ def main(unused_argv):
     # Log training summaries. This is put behind a host_id check because in
     # multi-host evaluation, all hosts need to run inference even though we
     # only use host 0 to record results.
-    if (jax.host_id() == 0):
+    if (jax.process_index() == 0):
       if (step % config.print_every == 0):
         summary_writer.scalar('num_params', num_params, step)
         summary_writer.scalar('train_loss', stats.loss[0], step)
@@ -325,34 +356,35 @@ def main(unused_argv):
         summary_writer.scalar('train_rays_per_sec', rays_per_sec, step)
         precision = int(np.ceil(np.log10(config.max_steps))) + 1
         print(('{:' + '{:d}'.format(precision) + 'd}').format(step) +
-              f'/{config.max_steps:d}: ' + f'i_loss={stats.loss[0]:0.4f}, ' +
-              f'avg_loss={avg_loss:0.4f}, ' +
+              f'/{config.max_steps:d}: ' + f'i_loss={stats.loss[0]:0.8f}, ' +
+              f'avg_loss={avg_loss:0.8f}, ' +
               f'weight_l2={stats.weight_l2[0]:0.2e}, ' + f'lr={lr:0.2e}, ' +
               f'{rays_per_sec:0.0f} rays/sec')
       
       if (step % config.save_every == 0):
-        state_to_save = jax.device_get(jax.tree_map(lambda x: x[0], state))
+        state_to_save = jax.device_get(jax.tree.map(lambda x: x[0], state))
         checkpoints.save_checkpoint(FLAGS.train_dir, state_to_save, int(step), keep=100)
 
     # Test-set evaluation.
     if ((FLAGS.render_every > 0) and (step % FLAGS.render_every == 0)):
       # We reuse the same random number generator from the optimization step
-      # here on purpose so that the visualization matches what happened in
-      # training.
+      # here on purpose so that the visualization matches what happened in training.
+      data_out_path = os.path.join(FLAGS.train_dir, 'vis_img/')
+      os.makedirs(data_out_path, exist_ok=True)
+
       t_eval_start = time.time()
-      eval_variables = jax.device_get(jax.tree_map(lambda x: x[0], state)).optimizer.target
+      eval_variables = jax.device_get(jax.tree.map(lambda x: x[0], state)).optimizer.params
       test_case = next(test_dataset)
       pred_color, pred_distance, pred_acc = models.render_image(
-        functools.partial(render_eval_pfn, eval_variables),
-        test_case['rays'],
-        keys[0],
-        chunk=FLAGS.chunk, a=a, f=f, l=l, train_coc=train_coc
+        functools.partial(render_eval_pfn, eval_variables), test_case['rays'], keys[0],
+        chunk=FLAGS.chunk, a=a, f=f, l=l, train_coc=train_coc,
       )
+      utils.save_img_uint8(pred_color, os.path.join(data_out_path, 'color_{}.png'.format(step)))
 
-      #vis_suite = vis.visualize_suite(pred_distance, pred_acc)
+      # vis_suite = vis.visualize_suite(pred_distance, pred_acc)
 
       # Log eval summaries on host 0.
-      if (jax.host_id() == 0):
+      if (jax.process_index() == 0):
         psnr = math.mse_to_psnr(((pred_color - test_case['pixels'])**2).mean())
         #ssim = ssim_fn(pred_color, test_case['pixels'])
         eval_time = time.time() - t_eval_start
@@ -370,7 +402,7 @@ def main(unused_argv):
         file.write('step: ' + str(step) + ' ' + 'psnr: ' + str(psnr) + '\r\n')
 
   if (config.max_steps % config.save_every != 0):
-    state = jax.device_get(jax.tree_map(lambda x: x[0], state))
+    state = jax.device_get(jax.tree.map(lambda x: x[0], state))
     checkpoints.save_checkpoint(FLAGS.train_dir, state, int(config.max_steps), keep=100)
 
 

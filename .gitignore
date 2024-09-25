@@ -1,0 +1,6 @@
+nerf_llff_data/*
+nerf_synthetic/*
+nerf_real_360/*
+events.*
+experiments/*
+*.pyc

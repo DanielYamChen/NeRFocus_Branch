@@ -22,6 +22,7 @@ import dataclasses
 import flax
 import gin
 import jax
+import optax
 import jax.numpy as jnp
 import numpy as np
 from PIL import Image
@@ -29,14 +30,14 @@ from PIL import Image
 gin.add_config_file_search_path('../')
 
 
-gin.config.external_configurable(flax.nn.relu, module='flax.nn')
-gin.config.external_configurable(flax.nn.sigmoid, module='flax.nn')
-gin.config.external_configurable(flax.nn.softplus, module='flax.nn')
+gin.config.external_configurable(flax.linen.relu, module='flax.nn')
+gin.config.external_configurable(flax.linen.sigmoid, module='flax.nn')
+gin.config.external_configurable(flax.linen.softplus, module='flax.nn')
 
 
 @flax.struct.dataclass
 class TrainState:
-  optimizer: flax.optim.Optimizer
+  optimizer: optax
 
 
 @flax.struct.dataclass
@@ -62,6 +63,7 @@ Rays = collections.namedtuple(
 class Config:
   """Configuration flags for everything."""
   dataset_loader: str = 'multicam'  # The type of dataset loader to use.
+  obj_name: str = '' # object name
   batching: str = 'all_images'  # Batch composition, [single_image, all_images].
   batch_size: int = 4096  # The number of rays/pixels in each batch.
   factor: int = 0  # The downsample factor of images, 0 for no downsampling.
@@ -92,14 +94,10 @@ def define_common_flags():
   # Define the flags used by both train.py and eval.py
   flags.DEFINE_multi_string('gin_file', None,
                             'List of paths to the config files.')
-  flags.DEFINE_multi_string(
-      'gin_param', None, 'Newline separated list of Gin parameter bindings.')
+  flags.DEFINE_multi_string('gin_param', None, 'Newline separated list of Gin parameter bindings.')
   flags.DEFINE_string('train_dir', None, 'where to store ckpts and logs')
   flags.DEFINE_string('data_dir', None, 'input data directory.')
-  flags.DEFINE_integer(
-      'chunk', 3072,
-      'the size of chunks for evaluation inferences, set to the value that'
-      'fits your GPU/TPU memory.')
+  flags.DEFINE_integer('chunk', 3072, 'the size of chunks for evaluation inferences, set to the value that fits your GPU/TPU memory.')
 
 
 def load_config():

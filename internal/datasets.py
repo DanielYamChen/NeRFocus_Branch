@@ -72,7 +72,7 @@ class Dataset(threading.Thread):
       raise ValueError(
           'the split argument should be either \'train\' or \'test\', set'
           'to {} here.'.format(split))
-    self.batch_size = config.batch_size // jax.host_count()
+    self.batch_size = config.batch_size // jax.process_count()
     self.batching = config.batching
     self.render_path = config.render_path
     self.start()
@@ -313,12 +313,14 @@ class Blender(Dataset):
 
   def _load_renderings(self, config):
     """Load images from disk."""
-    if config.render_path:
+    if (config.render_path):
       raise ValueError('render_path cannot be used for the blender dataset.')
-    with utils.open_file(
-        path.join(self.data_dir, 'transforms_{}.json'.format(self.split)),
-        'r') as fp:
+    
+    # print(f"\nself.data_dir={self.data_dir}\n") # debug
+    
+    with utils.open_file(path.join(self.data_dir, 'transforms_{}.json'.format(self.split)), 'r') as fp:
       meta = json.load(fp)
+    
     images = []
     cams = []
     for i in range(len(meta['frames'])):
@@ -326,13 +328,13 @@ class Blender(Dataset):
       fname = os.path.join(self.data_dir, frame['file_path'] + '.png')
       with utils.open_file(fname, 'rb') as imgin:
         image = np.array(Image.open(imgin), dtype=np.float32) / 255.
-        if config.factor == 2:
+        if (config.factor == 2):
           [halfres_h, halfres_w] = [hw // 2 for hw in image.shape[:2]]
           image = cv2.resize(
               image, (halfres_w, halfres_h), interpolation=cv2.INTER_AREA)
-        elif config.factor > 0:
-          raise ValueError('Blender dataset only supports factor=0 or 2, {} '
-                           'set.'.format(config.factor))
+        elif (config.factor > 0):
+          raise ValueError('Blender dataset only supports factor=0 or 2, but {} set.'.format(config.factor))
+        
       cams.append(np.array(frame['transform_matrix'], dtype=np.float32))
       images.append(image)
     self.images = np.stack(images, axis=0)
